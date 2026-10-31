@@ -1,0 +1,56 @@
+@import 'tailwindcss';
+
+@theme {
+  --font-sans:
+    system-ui, -apple-system, 'Segoe UI', 'Noto Sans', 'Noto Naskh Arabic', 'Noto Sans Arabic',
+    sans-serif;
+  --color-brand-50: #f0fdfa;
+  --color-brand-100: #ccfbf1;
+  --color-brand-600: #0d9488;
+  --color-brand-700: #0f766e;
+  --color-brand-900: #134e4a;
+}
+
+/* Accessibility baseline (spec §8.2): the user's text size choice scales the root. */
+:root {
+  --asaani-scale: 1;
+  font-size: calc(16px * var(--asaani-scale));
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  @apply bg-stone-50 text-stone-900 antialiased;
+  /* Touch targets for older hands. */
+  min-height: 100dvh;
+}
+
+@media (prefers-color-scheme: dark) {
+  body {
+    @apply bg-stone-950 text-stone-100;
+  }
+}
+
+/* Every interactive element is at least 44px tall unless it is inline text. */
+button,
+a[role='button'],
+[role='tab'] {
+  min-height: 2.75rem;
+}
+
+:focus-visible {
+  outline: 3px solid var(--color-brand-600);
+  outline-offset: 2px;
+}
+
+@media print {
+  .no-print {
+    display: none !important;
+  }
+  body {
+    background: #fff;
+    color: #000;
+  }
+}

@@ -1,0 +1,27 @@
+{
+  "name": "asaani",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build && node scripts/hash-build.mjs dist",
+    "build:single": "vite build --mode single && node scripts/hash-build.mjs dist-single",
+    "preview": "vite preview --outDir dist",
+    "check": "svelte-check --tsconfig ./tsconfig.json",
+    "probe": "node spike/probe.mjs"
+  },
+  "dependencies": {
+    "dexie": "^4.4.7"
+  },
+  "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "^7.3.1",
+    "@tailwindcss/vite": "^4.3.3",
+    "svelte": "^5.57.3",
+    "svelte-check": "^4.7.7",
+    "tailwindcss": "^4.3.3",
+    "typescript": "^6.0.3",
+    "vite": "^8.3.5",
+    "vite-plugin-singlefile": "^2.3.4"
+  }
+}

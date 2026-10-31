@@ -1,0 +1,21 @@
+{
+  "name": "Asaani — offline library and barter",
+  "short_name": "Asaani",
+  "description": "Offline survival library and trust-based barter for neighbourhoods with no network.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#fafaf9",
+  "theme_color": "#0f766e",
+  "lang": "en",
+  "dir": "auto",
+  "icons": [
+    {
+      "src": "./icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

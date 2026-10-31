@@ -1,0 +1,8 @@
+node_modules/
+dist/
+dist-single/
+*.build.json
+.vite/
+*.local
+.DS_Store
+Thumbs.db

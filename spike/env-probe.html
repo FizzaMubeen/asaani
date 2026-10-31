@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>asaani env probe</title>
+<style>
+  body { font: 14px/1.4 system-ui, sans-serif; margin: 16px; }
+  pre { background: #f4f4f4; padding: 12px; border-radius: 8px; white-space: pre-wrap; }
+  .ok { color: #0a7a2f; } .bad { color: #b00020; }
+</style>
+</head>
+<body>
+<h1>asaani environment probe</h1>
+<p id="ctx"></p>
+<pre id="out">running...</pre>
+<script>
+(async () => {
+  const R = [];
+  const t0 = performance.now();
+  const add = (name, ok, detail, ms) =>
+    R.push({ name, ok, detail: String(detail ?? ''), ms: ms == null ? null : Math.round(ms) });
+
+  const time = async (fn) => { const s = performance.now(); try { return [await fn(), performance.now() - s, null]; } catch (e) { return [undefined, performance.now() - s, e]; } };
+
+  add('protocol', true, location.protocol + ' // isSecureContext=' + window.isSecureContext);
+  add('crypto.subtle', !!window.crypto?.subtle, typeof window.crypto?.subtle);
+
+  // 1. localStorage
+  try {
+    const k = '__probe_ls_' + Math.random();
+    localStorage.setItem(k, 'v1');
+    const got = localStorage.getItem(k);
+    localStorage.removeItem(k);
+    add('localStorage', got === 'v1', 'write+read ok');
+  } catch (e) { add('localStorage', false, e.name + ': ' + e.message); }
+
+  // 2. IndexedDB open + write + read
+  const idbOpen = () => new Promise((res, rej) => {
+    const req = indexedDB.open('__probe__', 1);
+    req.onupgradeneeded = () => req.result.createObjectStore('kv');
+    req.onsuccess = () => res(req.result);
+    req.onerror = () => rej(req.error || new Error('open error'));
+    req.onblocked = () => rej(new Error('blocked'));
+  });
+  try {
+    const db = await idbOpen();
+    await new Promise((res, rej) => {
+      const tx = db.transaction('kv', 'readwrite');
+      tx.objectStore('kv').put('v1', 'k');
+      tx.oncomplete = res; tx.onerror = () => rej(tx.error); tx.onabort = () => rej(tx.error || new Error('abort'));
+    });
+    const got = await new Promise((res, rej) => {
+      const tx = db.transaction('kv', 'readonly');
+      const r = tx.objectStore('kv').get('k');
+      r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error);
+    });
+    add('indexedDB', got === 'v1', 'open+put+get ok');
+    db.close();
+  } catch (e) { add('indexedDB', false, e.name + ': ' + e.message); }
+
+  // 3. storage persist + quota
+  try {
+    const persisted = await navigator.storage?.persisted?.();
+    const persistRes = await navigator.storage?.persist?.();
+    const est = await navigator.storage?.estimate?.();
+    add('storage.persist', true, `persisted=${persisted} persist()=${persistRes} quota=${est?.quota} usage=${est?.usage}`);
+  } catch (e) { add('storage.persist', false, e.name + ': ' + e.message); }
+
+  // 4. ECDSA P-256 sign/verify + non-extractability
+  let priv, pub;
+  {
+    const [k, ms, err] = await time(() => crypto.subtle.generateKey(
+      { name: 'ECDSA', namedCurve: 'P-256' }, false, ['sign', 'verify']));
+    if (err) add('ecdsa.generateKey(non-extractable)', false, err.name + ': ' + err.message, ms);
+    else { priv = k.privateKey; pub = k.publicKey; add('ecdsa.generateKey(non-extractable)', true, `extractable=${priv.extractable}`, ms); }
+  }
+  if (priv) {
+    const data = new TextEncoder().encode('asaani/receipt/v1/A\u0000{"v":1}');
+    const [sig, ms, err] = await time(() => crypto.subtle.sign({ name: 'ECDSA', hash: 'SHA-256' }, priv, data));
+    add('ecdsa.sign', !!sig && !err, err ? err.name + ': ' + err.message : sig.byteLength + ' bytes', ms);
+    if (sig) {
+      const okv = await crypto.subtle.verify({ name: 'ECDSA', hash: 'SHA-256' }, pub, sig, data);
+      add('ecdsa.verify', okv === true, 'valid=' + okv);
+      // non-determinism check: sign twice
+      const sig2 = await crypto.subtle.sign({ name: 'ECDSA', hash: 'SHA-256' }, priv, data);
+      const same = new Uint8Array(sig).every((b, i) => b === new Uint8Array(sig2)[i]);
+      add('ecdsa.deterministic', same, same ? 'identical bytes (deterministic)' : 'different bytes (random k)');
+    }
+    // can we export a non-extractable key?
+    try { await crypto.subtle.exportKey('pkcs8', priv); add('exportKey(non-extractable)', false, 'SUCCEEDED - key is not protected'); }
+    catch (e) { add('exportKey(non-extractable)', true, 'correctly refused: ' + e.name); }
+
+    // can we wrap a non-extractable key?
+    try {
+      const kek = await crypto.subtle.generateKey({ name: 'AES-KW', length: 256 }, false, ['wrapKey', 'unwrapKey']);
+      await crypto.subtle.wrapKey('pkcs8', priv, kek, 'AES-KW');
+      add('wrapKey(non-extractable)', false, 'SUCCEEDED - non-extractable keys CAN be wrapped here');
+    } catch (e) { add('wrapKey(non-extractable)', true, 'correctly refused: ' + e.name); }
+
+    // structured-clone a CryptoKey into IndexedDB and sign with it after reload
+    try {
+      const db = await idbOpen();
+      await new Promise((res, rej) => {
+        const tx = db.transaction('kv', 'readwrite');
+        tx.objectStore('kv').put(priv, 'key');
+        tx.oncomplete = res; tx.onerror = () => rej(tx.error);
+      });
+      const back = await new Promise((res, rej) => {
+        const tx = db.transaction('kv', 'readonly');
+        const r = tx.objectStore('kv').get('key');
+        r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error);
+      });
+      const sig3 = await crypto.subtle.sign({ name: 'ECDSA', hash: 'SHA-256' }, back, data);
+      const okv = await crypto.subtle.verify({ name: 'ECDSA', hash: 'SHA-256' }, pub, sig3, data);
+      add('CryptoKey via IndexedDB', okv === true, `type=${back?.constructor?.name} usable=${okv}`);
+      db.close();
+    } catch (e) { add('CryptoKey via IndexedDB', false, e.name + ': ' + e.message); }
+  }
+
+  // 5. PBKDF2 cost at 600k iterations (PIN KDF feasibility)
+  {
+    const [bits, ms, err] = await time(async () => {
+      const base = await crypto.subtle.importKey('raw', new TextEncoder().encode('123456'), 'PBKDF2', false, ['deriveBits']);
+      return crypto.subtle.deriveBits({ name: 'PBKDF2', salt: new Uint8Array(16), iterations: 600000, hash: 'SHA-256' }, base, 256);
+    });
+    add('PBKDF2 600k SHA-256', !err, err ? err.name : 'derived ' + (bits?.byteLength * 8) + ' bits', ms);
+  }
+
+  // 6. Ed25519 support (upgrade path)
+  try {
+    await crypto.subtle.generateKey({ name: 'Ed25519' }, false, ['sign', 'verify']);
+    add('Ed25519', true, 'supported');
+  } catch (e) { add('Ed25519', false, e.name); }
+
+  // 7. camera / barcode
+  add('BarcodeDetector', 'BarcodeDetector' in window, typeof window.BarcodeDetector);
+  add('getUserMedia', !!navigator.mediaDevices?.getUserMedia, typeof navigator.mediaDevices?.getUserMedia);
+  add('serviceWorker', 'serviceWorker' in navigator, 'serviceWorker' in navigator ? 'present' : 'absent');
+  add('showSaveFilePicker', !!window.showSaveFilePicker, typeof window.showSaveFilePicker);
+
+  // 8. misc display facts
+  add('ua', true, navigator.userAgent);
+  add('hardwareConcurrency', true, String(navigator.hardwareConcurrency));
+  add('deviceMemory(GiB)', true, String(navigator.deviceMemory));
+  add('total probe time', true, 'done', performance.now() - t0);
+
+  window.__results = R;
+  window.__done = true;
+  const out = document.getElementById('out');
+  out.innerHTML = R.map(r => `<span class="${r.ok ? 'ok' : 'bad'}">${r.ok ? 'PASS' : 'FAIL'}</span>  ${r.name.padEnd(30)} ${r.ms != null ? '[' + r.ms + 'ms] ' : ''}${r.detail}`).join('\n');
+  document.getElementById('ctx').textContent = location.href;
+})();
+</script>
+</body>
+</html>

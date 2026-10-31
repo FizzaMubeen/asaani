@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8"><title>asaani probe 2</title></head>
+<body>
+<pre id="out">running...</pre>
+<script>
+(async () => {
+  const R = [];
+  const add = (name, ok, detail) => R.push({ name, ok, detail: String(detail ?? '') });
+
+  // Service worker registration on file://
+  try {
+    const reg = await navigator.serviceWorker.register('./sw-probe.js', { scope: './' });
+    add('serviceWorker.register(file://)', true, 'registered: ' + (reg?.scope || 'ok'));
+  } catch (e) { add('serviceWorker.register(file://)', false, e.name + ': ' + e.message); }
+
+  // Cache Storage on file://
+  try {
+    const c = await caches.open('probe');
+    await c.put(new Request('./env-probe.html'), new Response('x'));
+    add('caches API(file://)', true, 'open+put ok');
+  } catch (e) { add('caches API(file://)', false, e.name + ': ' + e.message); }
+
+  // Is file:// a single shared origin? Tag localStorage and report the stored value.
+  const tagged = localStorage.getItem('__origin_tag');
+  if (!tagged) localStorage.setItem('__origin_tag', location.pathname);
+  add('localStorage origin tag', true, 'seen: ' + (tagged || '(none - first visit)') + ' / this page: ' + location.pathname);
+
+  // Web Locks + BroadcastChannel: inter-tab coordination if two copies are open
+  add('BroadcastChannel', 'BroadcastChannel' in window, typeof BroadcastChannel);
+  add('indexedDB.databases()', typeof indexedDB.databases === 'function', 'can enumerate DBs');
+
+  // Structured clone depth + size sanity for a 1MB receipt blob
+  try {
+    const big = { items: Array.from({ length: 200 }, (_, i) => ({ id: i, t: 'x'.repeat(200) })) };
+    const t = performance.now();
+    const db = await new Promise((res, rej) => { const r = indexedDB.open('__probe2__', 1); r.onupgradeneeded = () => r.result.createObjectStore('kv'); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); });
+    await new Promise((res, rej) => { const tx = db.transaction('kv', 'readwrite'); tx.objectStore('kv').put(big, 'big'); tx.oncomplete = res; tx.onerror = () => rej(tx.error); });
+    add('indexedDB 200-item write', true, 'ok in ' + Math.round(performance.now() - t) + 'ms, db=' + db.name);
+    db.close();
+  } catch (e) { add('indexedDB 200-item write', false, e.name + ': ' + e.message); }
+
+  window.__results = R; window.__done = true;
+  document.getElementById('out').textContent = R.map(r => (r.ok ? 'PASS ' : 'FAIL ') + r.name.padEnd(34) + r.detail).join('\n');
+})();
+</script>
+</body>
+</html>
