@@ -31,7 +31,9 @@ function policyFor(inlineScripts: boolean): string {
     "base-uri 'none'",
     "form-action 'none'",
     "object-src 'none'",
-    "frame-ancestors 'none'",
+    // NOTE: frame-ancestors cannot be delivered via <meta> and is intentionally
+    // omitted. It must be set as a real HTTP header by whatever serves the app
+    // (or by the Capacitor/WebView shell), not in this policy string.
   ].join('; ')
 }
 
